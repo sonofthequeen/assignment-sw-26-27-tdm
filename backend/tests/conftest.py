@@ -13,8 +13,10 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 
 from app.database import create_db_engine, create_session_factory
+from app.main import create_app
 from app.models import (
     ActivityType,
     Driver,
@@ -92,3 +94,17 @@ def base_graph(session):
         "layout": layout,
         "test": test,
     }
+
+
+@pytest.fixture
+def app(db_url):
+    application = create_app(db_url)
+    yield application
+    application.state.engine.dispose()
+
+
+@pytest.fixture
+def client(app):
+    # raise_server_exceptions=False: assert on the 500 response clients actually get.
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
