@@ -5,9 +5,14 @@ from fastapi import APIRouter, Query, status
 from app.dependencies import IdPath, SessionDep
 from app.routers.pages import page_of
 from app.schemas.common import Page, PageQuery, error_responses
+from app.schemas.planning import RunPlanComparison
 from app.schemas.testing import (
+    PlannedRunCancel,
     PlannedRunCreate,
+    PlannedRunDetail,
     PlannedRunRead,
+    PlannedRunReplace,
+    PlannedRunReplacement,
     RunCreate,
     RunDetail,
     RunSummary,
@@ -16,6 +21,7 @@ from app.schemas.testing import (
     TestListQuery,
     TestSummary,
 )
+from app.services import planning
 from app.services import testing as service
 
 router = APIRouter()
@@ -78,8 +84,48 @@ def list_planned_runs(
     summary="Get a planned run",
     responses=error_responses(404),
 )
-def get_planned_run(planned_run_id: IdPath, session: SessionDep) -> PlannedRunRead:
-    return PlannedRunRead.model_validate(service.get_planned_run(session, planned_run_id))
+def get_planned_run(planned_run_id: IdPath, session: SessionDep) -> PlannedRunDetail:
+    return PlannedRunDetail.model_validate(planning.get_planned_run_detail(session, planned_run_id))
+
+
+@router.post(
+    "/planned-runs/{planned_run_id}/cancel",
+    tags=["planned runs"],
+    summary="Cancel a planned run (kept for history, with its reason)",
+    responses=error_responses(404, 409),
+)
+def cancel_planned_run(
+    planned_run_id: IdPath, data: PlannedRunCancel, session: SessionDep
+) -> PlannedRunDetail:
+    plan = planning.cancel_planned_run(session, planned_run_id, data)
+    return PlannedRunDetail.model_validate(plan)
+
+
+@router.post(
+    "/planned-runs/{planned_run_id}/replace",
+    tags=["planned runs"],
+    status_code=status.HTTP_201_CREATED,
+    summary="Replace a planned run with a new plan in the same test (atomic)",
+    responses=error_responses(404, 409),
+)
+def replace_planned_run(
+    planned_run_id: IdPath, data: PlannedRunReplace, session: SessionDep
+) -> PlannedRunReplacement:
+    replaced, replacement = planning.replace_planned_run(session, planned_run_id, data)
+    return PlannedRunReplacement(
+        replaced=PlannedRunDetail.model_validate(replaced),
+        replacement=PlannedRunDetail.model_validate(replacement),
+    )
+
+
+@router.post(
+    "/planned-runs/{planned_run_id}/complete",
+    tags=["planned runs"],
+    summary="Mark a planned run as completed (requires at least one recorded actual run)",
+    responses=error_responses(404, 409),
+)
+def complete_planned_run(planned_run_id: IdPath, session: SessionDep) -> PlannedRunDetail:
+    return PlannedRunDetail.model_validate(planning.complete_planned_run(session, planned_run_id))
 
 
 @router.post(
@@ -110,3 +156,13 @@ def list_runs(
 )
 def get_run(run_id: IdPath, session: SessionDep) -> RunDetail:
     return RunDetail.model_validate(service.get_run(session, run_id))
+
+
+@router.get(
+    "/runs/{run_id}/plan-comparison",
+    tags=["runs"],
+    summary="Compare an actual run with its planned run",
+    responses=error_responses(404),
+)
+def compare_run_with_plan(run_id: IdPath, session: SessionDep) -> RunPlanComparison:
+    return planning.compare_run_with_plan(session, run_id)

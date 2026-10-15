@@ -163,7 +163,9 @@ def test_create_get_and_list_planned_runs(client, ctx):
     assert second.status_code == first.status_code == 201
     plan = first.json()
     assert plan["status"] == "PLANNED" and plan["test_id"] == test_id
-    assert client.get(f"{API}/planned-runs/{plan['id']}").json() == plan
+    detail = client.get(f"{API}/planned-runs/{plan['id']}").json()
+    assert {key: detail[key] for key in plan} == plan  # detail extends the create response
+    assert (detail["replaces"], detail["runs"]) == ([], [])
 
     page = client.get(f"{API}/tests/{test_id}/planned-runs").json()
     assert [p["sequence_number"] for p in page["items"]] == [1, 2]

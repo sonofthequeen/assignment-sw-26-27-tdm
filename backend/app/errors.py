@@ -65,6 +65,9 @@ KNOWN_CONSTRAINTS: dict[str, TranslatedError] = {
     "uq_lap_run_id_lap_number": _unique(
         "lap_number_taken", "lap_number", "This run already has a lap with this lap number."
     ),
+    "pk_run_condition": _unique(
+        "run_condition_already_exists", "run_id", "This run already has recorded conditions."
+    ),
     "pk_setup_corner_params": _unique(
         "setup_corner_taken", "corner", "This setup already has values for this corner."
     ),

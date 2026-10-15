@@ -6,16 +6,17 @@ denormalising or triggers):
 - a referenced setup snapshot must belong to the test's vehicle;
 - a run's planned run must belong to the same test.
 
-Planned-run status transitions (cancel/replace) are not part of this module yet.
+Planned-run lifecycle commands and plan comparison live in app.services.planning.
 """
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.exceptions import DomainValidationError, NotFoundError
+from app.exceptions import ConflictError, DomainValidationError, ErrorDetail, NotFoundError
 from app.models import (
     Driver,
     PlannedRun,
+    PlannedRunStatus,
     Run,
     Season,
     SetupSnapshot,
@@ -38,6 +39,22 @@ PLANNED_RUN_ORDER = (
     Ordering("id asc", PlannedRun.id.asc()),
 )
 RUN_ORDER = (Ordering("run_number asc", Run.run_number.asc()), Ordering("id asc", Run.id.asc()))
+
+# Runs may be recorded against open plans and, as further attempts, against completed
+# ones: plan status describes planning history, not exclusivity of execution. A
+# cancelled or replaced plan is no longer an instruction anyone should execute.
+RUN_LINKABLE_STATUSES = frozenset(
+    {PlannedRunStatus.PLANNED, PlannedRunStatus.MODIFIED, PlannedRunStatus.COMPLETED}
+)
+
+
+def require_run_linkable(plan: PlannedRun) -> None:
+    if plan.status not in RUN_LINKABLE_STATUSES:
+        raise ConflictError(
+            code="planned_run_state_conflict",
+            message=f"Planned run {plan.id} is {plan.status}; runs cannot be recorded against it.",
+            details=[ErrorDetail("planned_run_id", f"Planned run status is {plan.status}.")],
+        )
 
 
 # --- Cross-row validation -----------------------------------------------------
@@ -63,7 +80,7 @@ def _setup_for_test_vehicle(session: Session, test: Test, snapshot_id: int, fiel
         )
 
 
-def _validate_planned_run_references(
+def validate_planned_run_references(
     session: Session, test: Test, data: PlannedRunCreate, prefix: str = ""
 ) -> None:
     if data.expected_driver_id is not None:
@@ -95,7 +112,7 @@ def create_test(session: Session, data: TestCreate) -> Test:
     session.flush()
 
     for index, planned in enumerate(data.planned_runs):
-        _validate_planned_run_references(session, test, planned, prefix=f"planned_runs.{index}.")
+        validate_planned_run_references(session, test, planned, prefix=f"planned_runs.{index}.")
         session.add(PlannedRun(test_id=test.id, **planned.model_dump()))
     session.flush()
     return get_test(session, test.id)
@@ -141,15 +158,11 @@ def list_tests(session: Session, query: TestListQuery) -> PageResult:
 
 def create_planned_run(session: Session, test_id: int, data: PlannedRunCreate) -> PlannedRun:
     test = get_or_404(session, Test, test_id, "test")
-    _validate_planned_run_references(session, test, data)
+    validate_planned_run_references(session, test, data)
     planned_run = PlannedRun(test_id=test.id, **data.model_dump())
     session.add(planned_run)
     session.flush()
     return planned_run
-
-
-def get_planned_run(session: Session, planned_run_id: int) -> PlannedRun:
-    return get_or_404(session, PlannedRun, planned_run_id, "planned_run")
 
 
 def list_planned_runs(session: Session, test_id: int, page: PageQuery) -> PageResult:
@@ -173,6 +186,7 @@ def create_run(session: Session, test_id: int, data: RunCreate) -> Run:
                 "planned_run_id",
                 f"Planned run {data.planned_run_id} belongs to a different test.",
             )
+        require_run_linkable(planned_run)
     get_referenced(session, Driver, data.driver_id, "driver", "driver_id")
     _layout_at_test_location(session, test, data.track_layout_id, "track_layout_id")
     if data.setup_snapshot_id is not None:

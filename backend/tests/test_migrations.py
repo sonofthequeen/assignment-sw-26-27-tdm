@@ -4,6 +4,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
@@ -57,7 +58,9 @@ def test_upgrade_from_empty_database_creates_all_model_tables(engine):
     tables = set(inspect(engine).get_table_names())
     assert tables == set(Base.metadata.tables) | {"alembic_version"}
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0001"
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    head = ScriptDirectory.from_config(alembic_config("sqlite://")).get_current_head()
+    assert version == head
 
 
 def test_migration_schema_matches_orm_schema(engine, tmp_path):
@@ -123,3 +126,45 @@ def test_foreign_key_violation_is_rejected(engine):
                 " VALUES (999, 'Ghost', 'SKIDPAD', 50, '2026-01-01')"
             )
         )
+
+
+def test_revision_0002_upgrade_preserves_existing_rows_and_downgrade_works(tmp_path):
+    url = sqlite_url(tmp_path / "data.sqlite3")
+    config = alembic_config(url)
+    command.upgrade(config, "0001")
+    engine = create_db_engine(url)
+    try:
+        with engine.begin() as conn:
+            for statement in (
+                "INSERT INTO season (id, name) VALUES (1, 'S')",
+                "INSERT INTO vehicle (id, code, name) VALUES (1, 'V', 'V')",
+                "INSERT INTO track_location (id, name) VALUES (1, 'L')",
+                "INSERT INTO track_layout (id, track_location_id, name, activity_type,"
+                " verified_length_m, length_verified_on) VALUES (1, 1, 'A', 'SKIDPAD', 50,"
+                " '2026-01-01')",
+                "INSERT INTO driver (id, code, full_name) VALUES (1, 'D', 'D')",
+                "INSERT INTO test (id, season_id, vehicle_id, track_location_id, test_date, status)"
+                " VALUES (1, 1, 1, 1, '2026-03-01', 'PLANNED')",
+                "INSERT INTO planned_run (id, test_id, sequence_number, status, notes)"
+                " VALUES (1, 1, 1, 'PLANNED', 'keep')",
+                "INSERT INTO run (id, test_id, planned_run_id, run_number, driver_id,"
+                " track_layout_id) VALUES (1, 1, 1, 1, 1, 1)",
+            ):
+                conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT notes, replacement_reason FROM planned_run")).one()
+            assert tuple(row) == ("keep", None)
+
+        # Downgrade rebuilds planned_run while run rows reference it (FK handling in env.py).
+        command.downgrade(config, "0001")
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT notes FROM planned_run")).scalar_one() == "keep"
+            assert conn.execute(text("SELECT planned_run_id FROM run")).scalar_one() == 1
+            assert conn.execute(text("PRAGMA foreign_key_check")).all() == []
+            columns = {c["name"] for c in inspect(conn).get_columns("planned_run")}
+            assert "replacement_reason" not in columns
+            assert conn.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+    finally:
+        engine.dispose()

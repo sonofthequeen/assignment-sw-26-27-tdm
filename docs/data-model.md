@@ -1,8 +1,8 @@
 # Data Model
 
-Status: **Phase 2 — MVP-Core schema implemented** (Alembic revision `0001`).
-Source of truth: `backend/app/models/` and `backend/alembic/versions/0001_initial_schema.py`;
-`backend/tests/test_migrations.py` verifies that the two produce the same schema.
+Status: **MVP-Core schema implemented** (Alembic revisions `0001` and `0002`).
+Source of truth: `backend/app/models/` and `backend/alembic/versions/`;
+`backend/tests/test_migrations.py` verifies that migrations and models produce the same schema.
 
 Terminology: **run** always means an actual on-track run of the vehicle (table `run`),
 never a software process execution. A **planned run** is the pre-test instruction.
@@ -86,6 +86,7 @@ erDiagram
         text cancellation_reason
         int replaced_by_planned_run_id FK
         text notes
+        text replacement_reason "0002"
     }
     RUN {
         int id PK
@@ -174,7 +175,7 @@ calendar concept, not an instant.
   the test). One test day may use several layouts at the same location, for example skidpad
   in the morning and autocross in the afternoon.
   *Rule:* a run's layout must belong to its test's location. This is a cross-row rule,
-  **enforced in the service layer (Phase 4)**. Enforcing it in the database would need
+  **enforced in the service layer**. Enforcing it in the database would need
   either a denormalised `track_location_id` on `run` plus a composite FK, which duplicates
   data, or a trigger. Phase 2 deliberately uses neither.
 - **PlannedRun 1 → 0..N Run.** `run.planned_run_id` is nullable and **not unique**:
@@ -183,15 +184,22 @@ calendar concept, not an instant.
 
   Runs are numbered deterministically by `UNIQUE(test_id, run_number)`.
 - **Planned values are never overwritten.** Actual values live on `run` and `lap`.
-  Planned-versus-actual comparison is derived later by query (Phase 6). `expected_track_layout_id`
-  was added to the planned run, so that the comparison can show a layout change.
-- **Planned-run status transitions** are enforced in services (Phase 4). The database
-  enforces only row-local invariants:
+  Planned-versus-actual comparison is derived by query (`GET /runs/{id}/plan-comparison`).
+  `expected_track_layout_id` was added to the planned run, so that the comparison can show a
+  layout change.
+- **Planned-run status transitions** are explicit service commands: cancel, replace and
+  complete (see `docs/architecture.md`). The database enforces only row-local invariants:
   - CANCELLED requires a reason;
   - REPLACED requires a replacement link, and vice versa;
   - a plan cannot replace itself.
 
-  Same-test replacement is a cross-row rule, enforced in services.
+  Two further rules are enforced in services: a replacement belongs to the same test, and
+  REPLACED requires a `replacement_reason`.
+- **`planned_run.replacement_reason` (revision 0002)** records why a plan was replaced. It is
+  a dedicated column so that the reason never overwrites either plan's engineering `notes`.
+  It was added as a nullable column using SQLite's native ADD COLUMN, so existing rows are
+  untouched. A database CHECK ("REPLACED requires a reason") would force a rebuild of
+  `planned_run`, which `run` references, so this rule lives in the service layer instead.
 - **Nothing derivable is stored.** The following are all computed in queries (Phase 5):
   - completed lap count;
   - effective lap time (`raw_time_ms + penalty_duration_ms`);
@@ -200,7 +208,14 @@ calendar concept, not an instant.
 - **Setup snapshots are append-only.** A change creates a new snapshot with
   `based_on_snapshot_id`, `change_reason` (required by CHECK when derived) and `created_at`.
   One snapshot can be shared by many runs; that sharing is how reusable configurations are
-  represented. No update operation will exist, which Phase 4 enforces and tests. No triggers are used.
+  represented. The API has no update or delete operation. In addition, an ORM `before_flush`
+  guard rejects any update or delete of a persisted snapshot or corner row, and any attempt to
+  attach a corner to a persisted snapshot. The guard applies to every ORM session (API, seed
+  and import). Raw SQL is not guarded, because there are no database triggers by design.
+  Diffs are computed from two snapshots on demand and are never stored.
+- **Partial corner data is allowed.** A snapshot may hold zero to four corner rows. An
+  absent corner is an absent row, reported as `missing_corners`, and is never defaulted.
+  A corner row must carry at least one value.
 - **Setup storage: typed columns, no EAV or JSON.**
   - Whole-vehicle parameters are typed columns on `setup_snapshot`.
   - Per-corner parameters are rows in `setup_corner_params`, with `PK(setup_snapshot_id, corner)`.
@@ -232,16 +247,24 @@ calendar concept, not an instant.
 | `timing_valid` ⇔ `invalidation_reason` is NULL; invalid ⇒ non-blank reason | DB |
 | classification ∈ {FLYING, IN_LAP, OUT_LAP, ABORTED} | DB |
 | a penalised lap stays timing-valid | DB (no rule couples the two) |
-| ABORTED vs physically completed | **service policy (Phase 5), not a DB rule** |
-| plausibility (e.g. implied average speed limit per activity type) | **application policy (Phase 5)** |
+| ABORTED vs physically completed | **not a DB rule**; an ABORTED record marked physically completed counts one layout |
+| contradictory validity input | service, 422 `invalid_lap_state`; the DB CHECKs are the backstop |
+| plausibility (implied average speed per activity type, on raw time) | **application policy** (`app/policies.py`) |
+| effective time, fastest-lap eligibility, mileage contribution | derived `hybrid_property`s on `Lap`; never stored |
 | no global maximum lap time | deliberate |
 
 Why ABORTED is not a database rule: "aborted" describes the timed attempt. A driver can
 abort a push lap and still drive the complete loop back to the pits. Forcing
-`physically_completed = false` would therefore lose real distance. The Phase 5 mileage policy
-counts only `physically_completed` laps, and it will document how ABORTED laps are entered.
+`physically_completed = false` would therefore lose real distance. Mileage counts exactly the
+`physically_completed` laps. An ABORTED record therefore counts one full layout only when it
+explicitly says that the loop was completed.
 
-Temperature plausibility ranges are also application-level (Phase 5 validation). They are not
+**Binary mileage limitation.** A lap contributes either one full verified layout length or
+zero. There is no partial-distance field, so the distance of a lap abandoned mid-loop is
+never estimated. A future partial-distance model would add a nullable, verified
+`completed_distance_m` with its own source. It is not part of the MVP.
+
+Temperature plausibility ranges are also application-level (`app/policies.py`). They are not
 database CHECKs, because they are policy, not physical invariants.
 
 ## 5. Constraint naming
@@ -262,7 +285,7 @@ MVP-Core query. The data volume is small: tens of tests and thousands of laps pe
 |---|---|---|---|---|
 | `ix_test_season_id_test_date` | Tests of a season ordered by date; season filter in run search (`test.season_id = ? [AND test_date BETWEEN ? AND ?]`) | Equality first, then range/sort. Low selectivity for season alone, but it serves both filter and ordering. | No | One B-tree entry per test (low write rate) |
 | `ix_test_vehicle_id_test_date` | Vehicle history; "previous run of this vehicle" for setup diffs (`vehicle_id = ? ORDER BY test_date`) | Same pattern | No | Same |
-| `ix_run_driver_id` | Driver filter in run search; driver lifetime mileage | Medium selectivity (several drivers) | No | One entry per run |
+| `ix_run_driver_id` | Driver filter in run search; driver lifetime mileage (used) | Medium selectivity (several drivers) | No | One entry per run |
 | `ix_run_track_layout_id` | Layout filter; fastest laps per layout | Medium selectivity | No | One entry per run |
 
 These patterns are already covered by unique constraints, so no extra index was added:
@@ -290,9 +313,9 @@ in an additive Alembic revision (new tables with FKs to existing ones), with no 
 
 | Entity | Class | Planned revision / phase | Attaches to |
 |---|---|---|---|
-| SeasonObjective, TestObjective, RunObjective | MVP-Complete | Phase 4 | season, test, run |
+| SeasonObjective, TestObjective, RunObjective | MVP-Complete | after MVP-Core (Phase 6+) | season, test, run |
 | TireCompound, TireSet, Tire, RunTireAssignment, TireMeasurement, AlignmentMeasurement | MVP-Complete | Phase 6 | run (assignment: `UNIQUE(run, corner)`, `UNIQUE(run, tire)`) |
-| Wider setup parameters (dampers, ARB, corner mass, shims, ride height, aero) | MVP-Complete | Phase 4 | new nullable columns on existing setup tables |
+| Wider setup parameters (dampers, ARB, corner mass, shims, ride height, aero) | MVP-Complete | after MVP-Core (Phase 6+) | new nullable columns on existing setup tables (additive ADD COLUMN) |
 | TelemetryFile (metadata index) | MVP-Complete | Phase 6 | test, optional run |
 | ImportBatch (CSV import provenance) | MVP-Complete | Phase 7 | none |
 | Station / Person / StationAssignment | Extended | after Phase 8 | test |
@@ -304,9 +327,17 @@ in an additive Alembic revision (new tables with FKs to existing ones), with no 
 - Location: `backend/alembic/`. The URL comes from `DATABASE_URL` through `app.config`.
   Tests pass an explicit URL.
 - `render_as_batch` is enabled for SQLite, because SQLite cannot ALTER constraints and
-  batch mode recreates the table. The engine factory shared with the application sets
-  `PRAGMA foreign_keys=ON`. Future batch migrations that recreate referenced tables must
-  check for FK side effects.
+  batch mode recreates the table.
+- **Foreign keys during migrations.** A batch rebuild copies the table, drops the original
+  and renames the copy. With foreign keys enforced, dropping a referenced table fails. This
+  was found when downgrading `0002` on a database containing data. `env.py` therefore follows
+  SQLite's documented procedure: it sets `PRAGMA foreign_keys=OFF` for the migration connection
+  (outside any transaction), runs the migrations, and runs `PRAGMA foreign_key_check`. It fails
+  loudly if any violation remains, then re-enables the pragma. A test upgrades and downgrades
+  a database that contains referencing rows.
+- **Partial failures.** pysqlite runs DDL outside a transaction, so a SQLite migration that
+  fails midway can leave partial state, such as an `_alembic_tmp_*` table. Back up the database
+  file before migrating real data. PostgreSQL has transactional DDL.
 - Migrations do not import application types, which keeps each revision frozen.
 - The application never calls `create_all`. Only the drift test does, to build a comparison
   database.
@@ -319,4 +350,5 @@ in an additive Alembic revision (new tables with FKs to existing ones), with no 
 - The boolean CHECK expressions are already written portably (no `= 1`).
 - FK errors name the constraint.
 - Generated columns or expression indexes for effective time become an option.
-- `render_as_batch` is not needed.
+- `render_as_batch` and the foreign-key pragma handling are not needed.
+- "REPLACED requires `replacement_reason`" can become a CHECK constraint without a table rebuild.

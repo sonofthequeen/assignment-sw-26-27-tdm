@@ -36,15 +36,30 @@ def run_migrations_online() -> None:
     # Same engine factory as the application, so PRAGMA foreign_keys=ON applies here too.
     engine = create_db_engine(_database_url())
     with engine.connect() as connection:
+        is_sqlite = connection.dialect.name == "sqlite"
+        if is_sqlite:
+            # Batch migrations rebuild tables (copy, DROP, rename). With foreign keys
+            # enforced, DROP TABLE of a referenced table fails, so follow SQLite's
+            # documented procedure: disable enforcement for the migration, then verify
+            # integrity with foreign_key_check before re-enabling. The pragma is ignored
+            # inside a transaction, hence the explicit commit of the autobegun one.
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             # SQLite cannot ALTER most constraints; batch mode recreates tables.
-            render_as_batch=connection.dialect.name == "sqlite",
+            render_as_batch=is_sqlite,
             compare_type=True,
         )
         with context.begin_transaction():
             context.run_migrations()
+        if is_sqlite:
+            violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
+            if violations:
+                raise RuntimeError(f"Migration left foreign-key violations: {violations[:10]}")
     engine.dispose()
 
 

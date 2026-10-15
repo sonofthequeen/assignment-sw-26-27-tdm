@@ -1,7 +1,7 @@
 from tests.api_helpers import API, assert_error
 
 
-def test_openapi_lists_only_versioned_phase3_paths(client):
+def test_openapi_lists_only_versioned_implemented_paths(client):
     response = client.get("/openapi.json")
     assert response.status_code == 200
     spec = response.json()
@@ -25,7 +25,32 @@ def test_openapi_lists_only_versioned_phase3_paths(client):
         f"{API}/planned-runs/{{planned_run_id}}",
         f"{API}/tests/{{test_id}}/runs",
         f"{API}/runs/{{run_id}}",
+        f"{API}/planned-runs/{{planned_run_id}}/cancel",
+        f"{API}/planned-runs/{{planned_run_id}}/replace",
+        f"{API}/planned-runs/{{planned_run_id}}/complete",
+        f"{API}/runs/{{run_id}}/plan-comparison",
+        f"{API}/setup-snapshots",
+        f"{API}/setup-snapshots/{{setup_snapshot_id}}",
+        f"{API}/setup-snapshots/{{setup_snapshot_id}}/derive",
+        f"{API}/setup-snapshots/{{setup_snapshot_id}}/diff",
+        f"{API}/runs/{{run_id}}/conditions",
+        f"{API}/runs/{{run_id}}/laps",
+        f"{API}/runs/{{run_id}}/laps/bulk",
+        f"{API}/laps/{{lap_id}}",
+        f"{API}/runs/{{run_id}}/fastest-lap",
+        f"{API}/runs/{{run_id}}/mileage",
+        f"{API}/tests/{{test_id}}/mileage",
+        f"{API}/seasons/{{season_id}}/mileage",
+        f"{API}/vehicles/{{vehicle_id}}/mileage",
+        f"{API}/drivers/{{driver_id}}/mileage",
     }
+
+
+def test_api_exposes_no_update_or_delete_operations(client):
+    """History is append-only: no PATCH/PUT/DELETE anywhere in the public API."""
+    spec = client.get("/openapi.json").json()
+    methods = {method for operations in spec["paths"].values() for method in operations}
+    assert methods <= {"get", "post"}
 
 
 def test_openapi_documents_the_standard_error_shape(client):

@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from app.models import ActivityType, PlannedRunStatus, TestStatus
 from app.schemas.common import (
@@ -53,8 +53,44 @@ class PlannedRunRead(ResponseModel):
     expected_energy_limit_kwh: Decimal | None
     expected_control_map: str | None
     cancellation_reason: str | None
+    replacement_reason: str | None
     replaced_by_planned_run_id: int | None
     notes: str | None
+
+
+class PlannedRunCancel(RequestModel):
+    cancellation_reason: LongText
+
+
+class PlannedRunReplace(RequestModel):
+    """Replace a plan before execution. The original plan is kept unchanged except for
+    its status, replacement link and replacement reason."""
+
+    replacement_reason: LongText
+    replacement: PlannedRunCreate = Field(
+        description="The new plan, created in the same test; sequence_number must be unused."
+    )
+
+
+class RunRef(ResponseModel):
+    id: int
+    run_number: int
+
+
+class PlannedRunRef(ResponseModel):
+    id: int
+    sequence_number: int
+    status: PlannedRunStatus
+
+
+class PlannedRunDetail(PlannedRunRead):
+    replaces: list[PlannedRunRef] = Field(description="Plans that this plan replaced.")
+    runs: list[RunRef] = Field(description="Actual runs (attempts) recorded against this plan.")
+
+
+class PlannedRunReplacement(BaseModel):
+    replaced: PlannedRunDetail
+    replacement: PlannedRunDetail
 
 
 # --- Tests ------------------------------------------------------------------

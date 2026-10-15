@@ -132,14 +132,26 @@ class PlannedRun(Base):
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
     replaced_by_planned_run_id: Mapped[int | None] = mapped_column(ForeignKey("planned_run.id"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Why this plan was replaced; required for REPLACED by the service layer. Declared last
+    # to match the physical column order of revision 0002 (SQLite ADD COLUMN appends). No
+    # CHECK: adding one would force a rebuild of planned_run, which other tables reference.
+    replacement_reason: Mapped[str | None] = mapped_column(Text)
 
     test: Mapped[Test] = relationship(back_populates="planned_runs")
     expected_driver: Mapped["Driver | None"] = relationship()  # noqa: F821
     expected_track_layout: Mapped["TrackLayout | None"] = relationship()  # noqa: F821
     expected_setup_snapshot: Mapped["SetupSnapshot | None"] = relationship()  # noqa: F821
-    replaced_by: Mapped["PlannedRun | None"] = relationship(remote_side=[id])
+    replaced_by: Mapped["PlannedRun | None"] = relationship(
+        remote_side=[id], back_populates="replaces"
+    )
+    # Plans this plan replaced (reverse of replaced_by).
+    replaces: Mapped[list["PlannedRun"]] = relationship(
+        back_populates="replaced_by", order_by="PlannedRun.id"
+    )
     # One plan may have several actual attempts (retries, aborted attempts).
-    runs: Mapped[list["Run"]] = relationship(back_populates="planned_run", order_by="Run.id")
+    runs: Mapped[list["Run"]] = relationship(
+        back_populates="planned_run", order_by="Run.run_number"
+    )
 
 
 class Run(Base):
