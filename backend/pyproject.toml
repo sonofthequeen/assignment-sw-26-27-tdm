@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "race-up-tdm"
+version = "0.1.0"
+description = "Race UP Test Data Manager backend"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "sqlalchemy>=2.0.30,<2.1",
+    "alembic>=1.13,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+filterwarnings = [
+    "error",
+    # SQLite has no native DECIMAL; SQLAlchemy warns once per Numeric column.
+    # Documented limitation in docs/data-model.md.
+    "ignore:Dialect sqlite\\+pysqlite does \\*not\\* support Decimal objects natively:sqlalchemy.exc.SAWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Generated migrations keep long SQL CHECK expressions on one line.
+"alembic/versions/*" = ["E501"]
+
+[tool.ruff.lint.isort]
+# The local alembic/ migration directory would otherwise make the package look first-party.
+known-third-party = ["alembic"]
