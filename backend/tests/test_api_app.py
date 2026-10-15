@@ -55,6 +55,12 @@ def test_openapi_lists_only_versioned_implemented_paths(client):
         f"{API}/runs/{{run_id}}/tire-assignments",
         f"{API}/runs/{{run_id}}/tire-measurements",
         f"{API}/runs/{{run_id}}/alignment-measurements",
+        f"{API}/seasons/{{season_id}}/objectives",
+        f"{API}/objectives/{{objective_id}}",
+        f"{API}/tests/{{test_id}}/objectives",
+        f"{API}/runs/{{run_id}}/objectives",
+        f"{API}/tests/{{test_id}}/files",
+        f"{API}/files/{{file_id}}",
     }
 
 

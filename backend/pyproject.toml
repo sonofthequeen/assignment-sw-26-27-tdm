@@ -47,6 +47,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Generated migrations keep long SQL CHECK expressions on one line.
 "alembic/versions/*" = ["E501"]
+# The demo dataset is easier to review as one row per record.
+"scripts/seed.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 # The local alembic/ migration directory would otherwise make the package look first-party.

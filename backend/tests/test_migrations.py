@@ -225,3 +225,56 @@ def test_revision_0003_adds_tyre_tables_without_touching_existing_data(tmp_path)
         command.upgrade(config, "head")
     finally:
         engine.dispose()
+
+
+def test_revision_0004_preserves_run_lap_setup_and_tyre_data(tmp_path):
+    url = sqlite_url(tmp_path / "phase65.sqlite3")
+    config = alembic_config(url)
+    command.upgrade(config, "0003")
+    engine = create_db_engine(url)
+    seed = (
+        "INSERT INTO season (id, name) VALUES (1, 'S')",
+        "INSERT INTO vehicle (id, code, name) VALUES (1, 'V', 'V')",
+        "INSERT INTO track_location (id, name) VALUES (1, 'L')",
+        "INSERT INTO track_layout (id, track_location_id, name, activity_type, verified_length_m,"
+        " length_verified_on) VALUES (1, 1, 'A', 'AUTOCROSS', 1000, '2026-01-01')",
+        "INSERT INTO driver (id, code, full_name) VALUES (1, 'D', 'D')",
+        "INSERT INTO setup_snapshot (id, vehicle_id, created_at, power_limit_kw)"
+        " VALUES (1, 1, '2026-01-01 00:00:00', 80)",
+        "INSERT INTO test (id, season_id, vehicle_id, track_location_id, test_date, status)"
+        " VALUES (1, 1, 1, 1, '2026-03-01', 'PLANNED')",
+        "INSERT INTO run (id, test_id, run_number, driver_id, track_layout_id, setup_snapshot_id)"
+        " VALUES (1, 1, 1, 1, 1, 1)",
+        "INSERT INTO lap (run_id, lap_number, lap_classification, raw_time_ms, timing_valid,"
+        " physically_completed) VALUES (1, 1, 'FLYING', 65000, 1, 1)",
+        "INSERT INTO tire_compound (id, manufacturer, name) VALUES (1, 'M', 'C')",
+        "INSERT INTO tire (id, serial_number, compound_id) VALUES (1, 'T', 1)",
+        "INSERT INTO run_tire_assignment (run_id, corner, tire_id) VALUES (1, 'FL', 1)",
+    )
+    preserved = (
+        "SELECT (SELECT count(*) FROM lap) || '/' || (SELECT count(*) FROM setup_snapshot)"
+        " || '/' || (SELECT count(*) FROM run_tire_assignment) || '/' || (SELECT count(*) FROM run)"
+    )
+    try:
+        with engine.begin() as conn:
+            for statement in seed:
+                conn.execute(text(statement))
+        command.upgrade(config, "head")
+        with engine.begin() as conn:
+            assert conn.execute(text(preserved)).scalar_one() == "1/1/1/1"
+            conn.execute(
+                text(
+                    "INSERT INTO season_objective (season_id, description, priority,"
+                    " desired_repetitions, status) VALUES (1, 'O', 'HIGH', 2, 'OPEN')"
+                )
+            )
+            conn.execute(text("INSERT INTO run_objective (run_id, objective_id) VALUES (1, 1)"))
+        command.downgrade(config, "0003")
+        with engine.connect() as conn:
+            assert conn.execute(text(preserved)).scalar_one() == "1/1/1/1"
+            tables = set(inspect(conn).get_table_names())
+            assert not tables & {"season_objective", "run_objective", "telemetry_file"}
+            assert conn.execute(text("PRAGMA foreign_key_check")).all() == []
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()

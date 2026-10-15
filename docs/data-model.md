@@ -1,6 +1,6 @@
 # Data Model
 
-Status: **MVP-Core schema plus tyres implemented** (Alembic revisions `0001` to `0003`).
+Status: **Complete assignment schema implemented** (Alembic revisions `0001` to `0004`).
 Source of truth: `backend/app/models/` and `backend/alembic/versions/`;
 `backend/tests/test_migrations.py` verifies that migrations and models produce the same schema.
 
@@ -204,6 +204,49 @@ erDiagram
     }
 ```
 
+### 1.2 Objectives and file index (revision 0004)
+
+```mermaid
+erDiagram
+    SEASON ||--o{ SEASON_OBJECTIVE : "objectives"
+    SEASON_OBJECTIVE ||--o{ TEST_OBJECTIVE : "addressed by test"
+    TEST ||--o{ TEST_OBJECTIVE : "addresses"
+    SEASON_OBJECTIVE ||--o{ RUN_OBJECTIVE : "addressed by run"
+    RUN ||--o{ RUN_OBJECTIVE : "addresses"
+    TEST ||--o{ TELEMETRY_FILE : "files"
+    RUN |o--o{ TELEMETRY_FILE : "files (optional)"
+
+    SEASON_OBJECTIVE {
+        int id PK
+        int season_id FK
+        text description
+        enum priority "CRITICAL HIGH MEDIUM LOW"
+        int desired_repetitions "> 0"
+        enum status "OPEN IN_PROGRESS ACHIEVED DROPPED"
+        text notes
+    }
+    TEST_OBJECTIVE {
+        int test_id PK, FK
+        int objective_id PK, FK
+    }
+    RUN_OBJECTIVE {
+        int run_id PK, FK
+        int objective_id PK, FK
+    }
+    TELEMETRY_FILE {
+        int id PK
+        int test_id FK
+        int run_id FK "nullable, same test"
+        enum file_type
+        string original_filename
+        string storage_uri
+        string checksum_sha256 UK
+        bigint size_bytes ">= 0"
+        json metadata "flat, bounded"
+        datetime imported_at "UTC"
+    }
+```
+
 ## 2. Engineering units and numeric precision
 
 Units are carried in column names. Every physical quantity is metric/SI-derived.
@@ -357,6 +400,45 @@ Each is inclusive:
 | Camber | ±10° |
 | Toe | ±5° |
 
+
+## 3b. Objectives and the file index (revision 0004)
+
+**Objectives:**
+- A season has many `season_objective` rows, each with a priority (CRITICAL, HIGH, MEDIUM or
+  LOW), `desired_repetitions > 0` and a status.
+- Tests and actual runs link to objectives through `test_objective` and `run_objective`. The
+  composite primary key on each link table rejects duplicate links.
+- **Same-season rule** (enforced in the service layer): a test may only link objectives of
+  its own season, and a run only objectives of its parent test's season. A database
+  constraint would need `UNIQUE(id, season_id)` on `test`, which means rebuilding an
+  existing table.
+- **Progress is derived, never stored:** `linked_run_count` is the number of runs linked to
+  the objective, and `remaining_repetitions = max(desired - linked_runs, 0)`.
+- Links are create-once. Unlinking, and updating an objective's status, are deferred,
+  because rewriting what a run was meant to test destroys traceability.
+
+**Telemetry and log file index:**
+- The index holds metadata only; binaries are never stored in the database.
+- `storage_uri` locates the file in externally managed storage (a team NAS, an object store,
+  and so on). The system neither uploads nor downloads files.
+- `checksum_sha256` is 64 lowercase hex characters and is **globally unique**: the same
+  content is indexed once, and offering it again is a 409.
+- `size_bytes >= 0`.
+- An optional `run_id` must belong to the same test (service rule).
+- `imported_at` is in UTC.
+- **`metadata` is the schema's only JSON column.** It holds auxiliary, source-dependent data
+  such as logger type, channel count or sample rate. It is validated as a flat object:
+  snake_case keys; scalar values (string, integer, finite number, boolean or null); at most
+  50 keys; strings of at most 500 characters; at most 8 KB serialised. Core relational facts
+  (test, run, type, size, checksum) are real columns.
+- Index `ix_telemetry_file_test_id_imported_at` serves the per-test listing, newest first.
+  A test's files grow without bound over years of logging, unlike the other tables. Filters
+  on `run_id` and `file_type` are applied as residual filters within that test.
+
+**No other index was added.** The link tables' composite primary keys cover lookups by
+test or run. The reverse lookup by objective (progress) and `season_objective(season_id)`
+are scans of tens of rows at this scale.
+
 ## 4. Lap semantics encoded in the schema
 
 | Rule | Where |
@@ -444,10 +526,8 @@ in an additive Alembic revision (new tables with FKs to existing ones), with no 
 
 | Entity | Class | Planned revision / phase | Attaches to |
 |---|---|---|---|
-| SeasonObjective, TestObjective, RunObjective | MVP-Complete | after MVP-Core (Phase 6+) | season, test, run |
 | Wider setup parameters (dampers, ARB, corner mass, shims, ride height, aero) | MVP-Complete | after MVP-Core (Phase 6+) | new nullable columns on existing setup tables (additive ADD COLUMN) |
-| TelemetryFile (metadata index) | MVP-Complete | Phase 6 | test, optional run |
-| ImportBatch (CSV import provenance) | MVP-Complete | Phase 7 | none |
+| ImportBatch (CSV import provenance) | Deferred | none | none (re-import is detected by natural keys) |
 | Station / Person / StationAssignment | Extended | after Phase 8 | test |
 | LapSector | Extended | after Phase 8 | lap (`UNIQUE(lap, sector_number)`) |
 | Setup parameter definitions/values | Extended | after Phase 8 | setup_snapshot |

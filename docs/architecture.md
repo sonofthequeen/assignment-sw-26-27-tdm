@@ -1,9 +1,10 @@
 # Architecture
 
-Status: **Phase 6.5**. The MVP-Core backend plus tyres is implemented: API foundation, the
+Status: **Phase 7**. The backend is complete for the assignment: API foundation, the
 planned-versus-actual workflow, append-only setup snapshots, run conditions, laps, fastest
 lap, mileage, **historical run search**, fastest-lap rankings and the test plan-vs-actual
-summary, tyre inventory, fitment and measurements. Later phases extend this document.
+summary, tyre inventory, fitment and measurements, objectives, the telemetry file index,
+deterministic seed data and the CSV importer. Later phases extend this document.
 The schema is documented in [data-model.md](data-model.md).
 
 ## Backend layout
@@ -508,6 +509,55 @@ are described in `docs/data-model.md` §3a.
   are used because alphabetical order would put POST_RUN first.
 - Alignment measurements never change setup snapshots.
 
+## Objectives and file index (`app/services/objectives.py`, `app/services/files.py`)
+
+**Objectives:**
+- `POST`/`GET /seasons/{id}/objectives` lists objectives CRITICAL first, then by id.
+- `GET /objectives/{id}` returns derived progress: `linked_test_count`, `linked_run_count`
+  and `remaining_repetitions`.
+- `POST`/`GET /tests/{id}/objectives` and `/runs/{id}/objectives` link objectives:
+  - `{"objective_ids": [...]}`, 1 to 50 ids, all or nothing;
+  - an objective of another season is 422 `objective_season_mismatch`;
+  - an existing link is 409 `objective_link_conflict`;
+  - an unknown id is 422 `referenced_resource_not_found`.
+
+**Files** (metadata only):
+- `POST /tests/{id}/files` and `GET /tests/{id}/files?run_id=&file_type=` (newest first),
+  and `GET /files/{id}`.
+- A run of another test is 422 `run_not_in_test`. A known checksum is 409
+  `file_checksum_taken`. An invalid checksum, size, name, URI or metadata is 422.
+
+## Seed data (`backend/scripts/seed.py`)
+
+Run with `python -m scripts.seed [--database-url …]`, after `alembic upgrade head`.
+
+- The dataset is deterministic and synthetic: 152 rows across every table.
+- It is built **through the same services and schemas as the API**, so it obeys every rule;
+  a seed that broke a rule would fail.
+- **One transaction.** The marker season `DEMO 2025/26` makes a repeat run report "already
+  present" and write nothing. A failure part-way rolls everything back, so the dataset is
+  always either fully present or absent. Both cases are tested.
+- **What it demonstrates:**
+  - Two seasons, two vehicles, three drivers, two locations, and four layouts (autocross,
+    endurance, skidpad, acceleration).
+  - Four objectives with links.
+  - A plan with every outcome: completed; cancelled; replaced, then executed twice (an
+    aborted attempt and a retry); never executed. Plus an unexpected run.
+  - Root and derived setup snapshots.
+  - Varied conditions.
+  - Every lap kind: valid, penalised, timing-invalid but completed, untimed, IN and OUT
+    laps, and ABORTED laps both completed and not.
+  - Three compounds, three sets, a spare tyre, and mixed-compound fitment.
+  - PRE and POST tyre and alignment measurements.
+  - Four indexed files.
+- The README query (season + driver + compound + asphalt 30–40 °C) returns runs 1, 3 and 4
+  of the autocross day. This is tested.
+
+## CSV import
+
+See [import-strategy.md](import-strategy.md): the canonical format, normalisation, the
+duplicate policy, whole-file atomicity, and dry run (the default).
+
 
 ## Pagination and ordering
 
@@ -530,6 +580,8 @@ system) and `order_by`. Every ordering ends with the primary key, so it is deter
 | fastest-lap ranking | `effective_time_ms`, `raw_time_ms`, `lap_number`, `lap_id` (all asc) |
 | tyre compounds | `manufacturer asc`, `name asc`, `id asc` |
 | tyre sets, tyres | `set_code asc` / `serial_number asc`, then `id asc` |
+| season objectives | priority (CRITICAL, HIGH, MEDIUM, LOW), then `id asc` |
+| files of a test | `imported_at desc`, `id desc` |
 
 Offset pagination becomes slower at deep offsets and can skip or repeat rows when data
 changes between page requests. Cursor pagination over the same orderings is the planned upgrade.
@@ -570,11 +622,12 @@ changes are the named planned-run commands above. A planned run is always create
 | Analytics | `GET /analytics/fastest-laps?track_layout_id=|activity_type=&…`, `GET /tests/{id}/plan-vs-actual` |
 | Tyre inventory | `POST`/`GET /tire-compounds`, `GET /tire-compounds/{id}`, `POST`/`GET /tire-sets`, `GET /tire-sets/{id}`, `POST`/`GET /tires`, `GET /tires/{id}` |
 | Fitment and measurements | `POST`/`GET /runs/{id}/tire-assignments`, `POST`/`GET /runs/{id}/tire-measurements`, `POST`/`GET /runs/{id}/alignment-measurements` |
+| Objectives | `POST`/`GET /seasons/{id}/objectives`, `GET /objectives/{id}`, `POST`/`GET /tests/{id}/objectives`, `POST`/`GET /runs/{id}/objectives` |
+| File index | `POST`/`GET /tests/{id}/files`, `GET /files/{id}` |
 
 The following do not exist yet and are not shown in OpenAPI:
 
 - setup-performance statistics
 - run-to-previous-run setup history
-- objectives
-- telemetry index
-- CSV import
+- test-day stations (Extended)
+- binary file upload or download (by design)

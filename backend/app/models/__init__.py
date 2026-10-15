@@ -1,7 +1,15 @@
 """Importing this package registers every mapped table on Base.metadata (used by Alembic)."""
 
 from app.models.base import Base, Corner
+from app.models.files import FileType, TelemetryFile
 from app.models.laps import Lap, LapClassification
+from app.models.objectives import (
+    ObjectivePriority,
+    ObjectiveStatus,
+    RunObjective,
+    SeasonObjective,
+    TestObjective,
+)
 from app.models.reference import Driver, Season, Vehicle
 from app.models.setup import SetupCornerParams, SetupSnapshot
 from app.models.testing import (
@@ -27,6 +35,13 @@ from app.models.tyres import (
 )
 
 __all__ = [
+    "FileType",
+    "ObjectivePriority",
+    "ObjectiveStatus",
+    "RunObjective",
+    "SeasonObjective",
+    "TelemetryFile",
+    "TestObjective",
     "ActivityType",
     "AlignmentMeasurement",
     "Base",

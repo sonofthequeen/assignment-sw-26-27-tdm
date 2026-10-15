@@ -86,6 +86,15 @@ KNOWN_CONSTRAINTS: dict[str, TranslatedError] = {
     "uq_alignment_measurement_run_id_corner_phase": _unique(
         "alignment_measurement_conflict", "phase", "This corner and phase are already measured."
     ),
+    "uq_telemetry_file_checksum_sha256": _unique(
+        "file_checksum_taken", "checksum_sha256", "A file with this checksum is already indexed."
+    ),
+    "pk_test_objective": _unique(
+        "objective_link_conflict", "objective_ids", "This objective is already linked."
+    ),
+    "pk_run_objective": _unique(
+        "objective_link_conflict", "objective_ids", "This objective is already linked."
+    ),
     "pk_run_condition": _unique(
         "run_condition_already_exists", "run_id", "This run already has recorded conditions."
     ),

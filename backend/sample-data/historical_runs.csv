@@ -1,0 +1,11 @@
+season_name,vehicle_code,driver_code,test_date,test_status,track_location,track_layout,run_number,planned_run_sequence,setup_name,lap_number,lap_classification,raw_time_ms,penalty_duration_ms,timing_valid,physically_completed,invalidation_reason,ambient_temperature_c,asphalt_temperature_c,conditions_source,weather,track_state,tire_fl,tire_fr,tire_rl,tire_rr
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,1,out-lap,79200,,yes,yes,,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,2,flying,63850,0,yes,yes,,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+ DEMO 2025/26 , DEMO-E25 , DEMO-BEN ,2025-11-08, COMPLETED ,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,3, Flying ,63120,2000,TRUE,TRUE,,16.0,29.5,MEASURED,CLOUDY,DRY,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,4,flying,62790,0,no,yes,Cut chicane,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,5,flying,,0,no,yes,Transponder miss,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,5,flying,,0,no,yes,Transponder miss,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-BEN,2025-11-08,completed,Demo Circuit North,Autocross loop,1,,E25 autocross baseline,6,in lap,86400,0,yes,yes,,16.0,29.5,measured,cloudy,dry,SOFT-A-FL,SOFT-A-FR,SOFT-A-RL,SOFT-A-RR
+DEMO 2025/26,DEMO-E25,DEMO-CLEO,2025-11-08,completed,Demo Circuit North,Skidpad,2,,,1,flying,5450,0,1,1,,17.5,31.0,estimated,clear,dry,,,,
+DEMO 2025/26,DEMO-E25,DEMO-CLEO,2025-11-08,completed,Demo Circuit North,Skidpad,2,,,2,flying,5380,0,1,1,,17.5,31.0,estimated,clear,dry,,,,
+DEMO 2025/26,DEMO-E25,DEMO-CLEO,2025-11-08,completed,Demo Circuit North,Skidpad,2,,,3,aborted,,0,0,0,Spun on entry,17.5,31.0,estimated,clear,dry,,,,

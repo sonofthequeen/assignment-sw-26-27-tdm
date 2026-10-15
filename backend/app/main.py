@@ -45,6 +45,8 @@ OPENAPI_TAGS = [
     {"name": "tyres", "description": "Compounds, tyre sets and physical tyres (one row per tyre)."},
     {"name": "tyre fitment", "description": "Which physical tyre was on which corner of a run."},
     {"name": "measurements", "description": "Pre/post-run tyre and alignment measurements."},
+    {"name": "objectives", "description": "Season objectives linked to tests and runs."},
+    {"name": "files", "description": "Index of telemetry/log files stored elsewhere."},
 ]
 
 

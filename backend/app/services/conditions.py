@@ -25,8 +25,8 @@ def _check_range(value: Decimal | None, low: Decimal, high: Decimal, field: str)
         )
 
 
-def create_run_condition(session: Session, run_id: int, data: RunConditionCreate) -> RunCondition:
-    get_or_404(session, Run, run_id, "run")
+def validate_condition_ranges(data: RunConditionCreate) -> None:
+    """Plausibility policy for temperatures (shared by the API and the CSV importer)."""
     limits = CONDITION_LIMITS
     _check_range(
         data.ambient_temperature_c,
@@ -40,6 +40,11 @@ def create_run_condition(session: Session, run_id: int, data: RunConditionCreate
         limits.asphalt_max_c,
         "asphalt_temperature_c",
     )
+
+
+def create_run_condition(session: Session, run_id: int, data: RunConditionCreate) -> RunCondition:
+    get_or_404(session, Run, run_id, "run")
+    validate_condition_ranges(data)
     if session.get(RunCondition, run_id) is not None:
         raise ConflictError(
             code="run_condition_already_exists",
