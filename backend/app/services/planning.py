@@ -116,23 +116,26 @@ def _compare(expected, actual) -> ComparisonStatus:
     return ComparisonStatus.MATCH if expected == actual else ComparisonStatus.DIFFERENT
 
 
+# Everything build_run_comparison reads, loaded with a fixed number of queries.
+COMPARISON_LOAD_OPTIONS = (
+    joinedload(Run.planned_run)
+    .joinedload(PlannedRun.expected_setup_snapshot)
+    .selectinload(SetupSnapshot.corners),
+    joinedload(Run.setup_snapshot).selectinload(SetupSnapshot.corners),
+)
+
+
 def compare_run_with_plan(session: Session, run_id: int) -> RunPlanComparison:
-    run = session.scalar(
-        select(Run)
-        .where(Run.id == run_id)
-        .options(
-            joinedload(Run.planned_run)
-            .joinedload(PlannedRun.expected_setup_snapshot)
-            .selectinload(SetupSnapshot.corners),
-            joinedload(Run.setup_snapshot).selectinload(SetupSnapshot.corners),
-        )
-    )
+    run = session.scalar(select(Run).where(Run.id == run_id).options(*COMPARISON_LOAD_OPTIONS))
     if run is None:
         raise NotFoundError("run", run_id)
+    return build_run_comparison(run, summarize_run_laps(session, run.id))
 
+
+def build_run_comparison(run: Run, laps: RunLapSummary) -> RunPlanComparison:
+    """Pure comparison rules: no queries, given a run loaded with COMPARISON_LOAD_OPTIONS."""
     plan = run.planned_run
     actual_control_map = run.setup_snapshot.control_map if run.setup_snapshot else None
-    laps = summarize_run_laps(session, run.id)
     fastest_ms = laps.fastest_lap.effective_time_ms if laps.fastest_lap else None
 
     if plan is None:

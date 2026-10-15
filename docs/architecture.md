@@ -1,8 +1,9 @@
 # Architecture
 
-Status: **Phase 5**. The API foundation, the planned-versus-actual workflow, the append-only
-setup snapshots, run conditions, laps, fastest lap and mileage are implemented. Later phases
-extend this document.
+Status: **Phase 6.5**. The MVP-Core backend plus tyres is implemented: API foundation, the
+planned-versus-actual workflow, append-only setup snapshots, run conditions, laps, fastest
+lap, mileage, **historical run search**, fastest-lap rankings and the test plan-vs-actual
+summary, tyre inventory, fitment and measurements. Later phases extend this document.
 The schema is documented in [data-model.md](data-model.md).
 
 ## Backend layout
@@ -20,6 +21,8 @@ backend/app/
   services/        business rules and queries; no HTTP, no commits
                    (reference, tracks, testing, planning, setup, conditions, laps,
                     mileage, lookup, pagination)
+  queries/         read-only compositions: historical run search, fastest-lap ranking,
+                   test plan-vs-actual summary
   policies.py      validation policy: temperature ranges, implied-speed caps, batch size
   routers/         thin HTTP layer: parse, call one service function, convert to schema
 ```
@@ -349,6 +352,162 @@ laps.
 `physically_completed` has low selectivity and is evaluated as a residual filter. An index on
 the effective-time expression is not justified at this scale; a run has tens of laps.
 
+## Historical run search (`GET /api/v1/runs`, `app/queries/historical_runs.py`)
+
+This endpoint covers the README's paramount requirement: multi-filter queries across tests.
+
+**Filters.** Every supplied filter is combined with **AND**; there is no OR. Unknown
+parameters are rejected with 422 `request_validation_failed`, never ignored, because a
+mistyped filter must not return unfiltered history.
+
+| Parameter | Matches |
+|---|---|
+| `season_id`, `vehicle_id`, `track_location_id` | the run's test |
+| `driver_id`, `track_layout_id` | the run |
+| `activity_type` | the run's layout |
+| `date_from`, `date_to` | `test.test_date`, inclusive. The test day is the authoritative historical date. |
+| `ambient_temperature_min_c` / `_max_c`, `asphalt_temperature_min_c` / `_max_c` | the run's conditions, inclusive, one decimal place |
+| `planned_run_id` | every actual attempt of that plan |
+| `tire_compound_id` | runs with **at least one** fitted tyre of that compound (correlated EXISTS, so a run with four matching corners appears once); runs without recorded fitment are excluded only when this filter is used |
+| `has_plan` | `true` for planned runs, `false` for unexpected runs |
+| `test_status` | the test's status |
+
+**Validation.** An inverted range is a 422: `invalid_date_range`,
+`invalid_ambient_temperature_range` or `invalid_asphalt_temperature_range`. Ranges are
+never swapped. `has_plan=false` together with `planned_run_id` is a 422
+`conflicting_plan_filters`. Ids must be positive. An id that matches nothing returns 200
+with no items, not a 404.
+
+**Missing conditions.** Conditions are optional. When a temperature filter is supplied,
+runs with no conditions row, or with a NULL value for that temperature, are excluded. When
+no temperature filter is supplied, they are included. Missing conditions are never invented.
+
+**Ordering and pagination.** The order is fixed: `test_date desc`, `run_number asc`,
+`id asc`. Client-chosen ordering is deliberately not offered. Pagination follows the
+standard contract (limit 1–100, default 50). `total` is computed with the same joins and
+filters as the page.
+
+**Each item** contains:
+- the run and its test (date, status);
+- season, vehicle, driver, track location and layout references;
+- `planned_run_id` and `unexpected`;
+- `setup_snapshot_id`;
+- a conditions summary;
+- `recorded_lap_count` and `physically_completed_lap_count`;
+- `fastest_lap` (eligible laps only, Phase 5 ranking, null if none);
+- `distance_m` (completed laps × verified length, as an exact decimal).
+
+Lap lists and setup corner values are left out; they have their own endpoints. Tests check
+that the derived values equal the `/fastest-lap` and `/mileage` endpoints for every run.
+
+**Query strategy.** The join is `run JOIN test JOIN track_layout LEFT JOIN run_condition`.
+Every join is to-one, so a run can never be duplicated and the total is never inflated;
+laps are not joined into the filter. A page costs **four statements regardless of its
+size**: the count, the page itself with references loaded through `contains_eager` and
+`joinedload`, the lap counts grouped by run, and the fastest lap per run through
+`ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY FASTEST_LAP_ORDER)`. This is asserted by
+a statement-count test. The batched lap statistics (`services.laps.lap_summaries`) also
+serve `/fastest-lap` and the plan comparisons, so the ranking is defined in exactly one place.
+
+**Index review** (EXPLAIN QUERY PLAN on the implemented queries):
+
+| Query | Plan |
+|---|---|
+| Driver filter | `ix_run_driver_id` |
+| Vehicle and dates | covering `ix_test_vehicle_id_test_date` range |
+| Lap analytics by layout | `ix_run_track_layout_id`, then `uq_lap` prefix |
+| Lap counts | covering `uq_lap` |
+| Run to test, layout and condition | primary keys |
+
+**No index was added.** Filtering by `planned_run_id` scans `run`. A plan has only a few
+attempts, and the run table holds thousands of rows at most, so the scan is cheap.
+`Run(planned_run_id)` is the first index to add if volume grows. Filtering by
+`activity_type` also scans `run`, which is the right plan for a low-selectivity value.
+Temperature indexes would have poor selectivity and are not justified. The temporary
+B-tree used for ORDER BY works on the filtered rows, which is acceptable at this scale.
+
+**Decimal bounds.** Temperature bounds are parsed as Decimal. SQLite stores and binds
+NUMERIC as REAL, but a one-decimal bound and a one-decimal stored value convert to the same
+double, so inclusive comparisons are exact. This is tested at the boundaries.
+
+## Analytics
+
+### `GET /analytics/fastest-laps`
+
+Eligible laps across runs, ranked with the Phase 5 policy: effective time, then raw time,
+then lap number, then lap id.
+
+- **Filters.** The same AND filters as run search. `track_layout_id` or `activity_type` is
+  **required** (otherwise 422 `invalid_search_filter`), because lap times on different
+  layouts are not comparable and an unbounded global ranking is never returned.
+- **Paging.** Results are paginated. `rank` is the position in the full ranking, so it
+  continues across pages.
+- **Each lap** carries its run, test, season, vehicle, driver, layout, conditions and setup
+  snapshot id.
+
+### `GET /tests/{id}/plan-vs-actual`
+
+A test's whole run plan, classified.
+
+- **Each plan** is one of `EXECUTED`, `NOT_EXECUTED`, `CANCELLED` or `REPLACED`, with its
+  reasons and replacement link, its attempts, and a `repeated` flag.
+- **Unexpected runs** are listed separately.
+- **Counts** are given for each category.
+- **Each attempt** gives its lap counts, its fastest effective time, and
+  `differing_aspects`: the aspects that `/runs/{id}/plan-comparison` reports as DIFFERENT or
+  TARGET_MISSED.
+- **The comparison rules are not duplicated.** The per-run comparison was refactored into a
+  pure `build_run_comparison(run, laps)`, which both endpoints call. Plans, runs with
+  comparison data, and batched lap statistics are loaded in a fixed number of queries; a
+  test checks this for 1, 3 and 11 runs.
+
+### Pending (MVP-Complete, not implemented)
+
+- **Setup-performance statistics** (best, median and standard deviation per setup, with
+  sample-size warnings).
+- **Run-to-previous-run setup history.**
+
+These were deferred so that the MVP-Core search could be completed and verified before the
+deadline. Tyres and the `tire_compound_id` filter were added in Phase 6.5. The filter
+is shared by run search and `/analytics/fastest-laps`.
+
+## Tyres, fitment and measurements (`app/services/tyres.py`)
+
+Naming: code and paths use `tire`; a Tire is one physical tyre. The schema and invariants
+are described in `docs/data-model.md` §3a.
+
+**Inventory** (`/tire-compounds`, `/tire-sets`, `/tires`):
+- Create, list and get.
+- `POST /tire-sets` can create the set's tyres in the same transaction. A taken serial
+  number rolls back the whole set.
+- Filters: sets by `compound_id`; tyres by `tire_set_id`, `compound_id` and an exact
+  `serial_number`.
+- A standalone tyre needs `compound_id` (422 `tire_compound_required`). A tyre in a set takes
+  the set's compound (422 `tire_compound_mismatch` if contradicted).
+
+**Fitment** (`POST /runs/{id}/tire-assignments`):
+- One to four corners per request, **all or nothing**.
+- In-request duplicates are a 422: `duplicate_tire_corner` or `duplicate_tire_assignment`.
+- A tyre id that doesn't exist is 422 `referenced_resource_not_found` on `assignments.{i}.tire_id`.
+- A corner that already has a tyre, or a tyre already fitted to this run, is a 409
+  `tire_assignment_conflict`. The service checks first, and the primary key and UNIQUE
+  constraint are the backstop; both paths are tested.
+- Fitment is create-once: no PATCH, PUT or DELETE.
+- `GET` returns the fitment in FL, FR, RL, RR order, with each tyre and its compound, in two
+  statements.
+
+**Measurements** (`/runs/{id}/tire-measurements`, `/runs/{id}/alignment-measurements`):
+- Batches of up to 8 (4 corners × 2 phases), all or nothing, create-once per (corner, phase).
+- A tyre measurement needs a fitted tyre at that corner (422 `tire_assignment_not_found`;
+  the composite FK is the backstop).
+- Out-of-policy or empty values are a 422: `invalid_tire_measurement` or
+  `invalid_alignment_measurement`. Precision violations are `request_validation_failed`.
+- Repeated keys are 422 `duplicate_measurement_in_batch`. Existing keys are 409
+  `tire_measurement_conflict` or `alignment_measurement_conflict`.
+- Lists are ordered PRE_RUN then POST_RUN, then FL, FR, RL, RR, then id. `case()` expressions
+  are used because alphabetical order would put POST_RUN first.
+- Alignment measurements never change setup snapshots.
+
 
 ## Pagination and ordering
 
@@ -367,6 +526,10 @@ system) and `order_by`. Every ordering ends with the primary key, so it is deter
 | runs of a test | `run_number asc`, `id asc` |
 | setup snapshots | `created_at desc`, `id desc` |
 | laps of a run | `lap_number asc`, `id asc` |
+| run search | `test_date desc`, `run_number asc`, `id asc` |
+| fastest-lap ranking | `effective_time_ms`, `raw_time_ms`, `lap_number`, `lap_id` (all asc) |
+| tyre compounds | `manufacturer asc`, `name asc`, `id asc` |
+| tyre sets, tyres | `set_code asc` / `serial_number asc`, then `id asc` |
 
 Offset pagination becomes slower at deep offsets and can skip or repeat rows when data
 changes between page requests. Cursor pagination over the same orderings is the planned upgrade.
@@ -403,10 +566,15 @@ changes are the named planned-run commands above. A planned run is always create
 | Run conditions | `POST /runs/{id}/conditions` (write-once), `GET /runs/{id}/conditions` |
 | Laps | `POST /runs/{id}/laps`, `POST /runs/{id}/laps/bulk`, `GET /runs/{id}/laps`, `GET /laps/{id}`, `GET /runs/{id}/fastest-lap` |
 | Mileage | `GET /runs/{id}/mileage`, `GET /tests/{id}/mileage`, `GET /seasons/{id}/mileage`, `GET /vehicles/{id}/mileage`, `GET /drivers/{id}/mileage` |
+| Historical search | `GET /runs?season_id=&vehicle_id=&driver_id=&track_location_id=&track_layout_id=&activity_type=&date_from=&date_to=&ambient_temperature_min_c=&ambient_temperature_max_c=&asphalt_temperature_min_c=&asphalt_temperature_max_c=&planned_run_id=&has_plan=&test_status=` |
+| Analytics | `GET /analytics/fastest-laps?track_layout_id=|activity_type=&…`, `GET /tests/{id}/plan-vs-actual` |
+| Tyre inventory | `POST`/`GET /tire-compounds`, `GET /tire-compounds/{id}`, `POST`/`GET /tire-sets`, `GET /tire-sets/{id}`, `POST`/`GET /tires`, `GET /tires/{id}` |
+| Fitment and measurements | `POST`/`GET /runs/{id}/tire-assignments`, `POST`/`GET /runs/{id}/tire-measurements`, `POST`/`GET /runs/{id}/alignment-measurements` |
 
 The following do not exist yet and are not shown in OpenAPI:
 
-- run search
+- setup-performance statistics
 - run-to-previous-run setup history
-- tyres
-- analytics (fastest laps by conditions, setup performance)
+- objectives
+- telemetry index
+- CSV import

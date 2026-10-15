@@ -158,22 +158,51 @@ class RunLapSummary:
     fastest_lap: Lap | None
 
 
-def summarize_run_laps(session: Session, run_id: int) -> RunLapSummary:
-    """Two queries regardless of lap count: one aggregate, one ranked fastest lap."""
-    recorded, completed, eligible = session.execute(
+EMPTY_LAP_SUMMARY = RunLapSummary(0, 0, 0, None)
+
+
+def lap_summaries(session: Session, run_ids: list[int]) -> dict[int, RunLapSummary]:
+    """Lap statistics for many runs in two queries, independent of the number of runs.
+
+    The fastest lap per run uses ROW_NUMBER() over FASTEST_LAP_ORDER, so the
+    single-run endpoints, historical search and plan comparisons share one ranking.
+    """
+    if not run_ids:
+        return {}
+    counts = session.execute(
         select(
+            Lap.run_id,
             func.count(Lap.id),
             func.count(Lap.id).filter(Lap.counts_toward_mileage),
             func.count(Lap.id).filter(Lap.fastest_lap_eligible),
-        ).where(Lap.run_id == run_id)
-    ).one()
-    fastest = session.scalar(
-        select(Lap)
-        .where(Lap.run_id == run_id, Lap.fastest_lap_eligible)
-        .order_by(*FASTEST_LAP_ORDER)
-        .limit(1)
+        )
+        .where(Lap.run_id.in_(run_ids))
+        .group_by(Lap.run_id)
+    ).all()
+    ranked = (
+        select(
+            Lap.id.label("lap_id"),
+            func.row_number()
+            .over(partition_by=Lap.run_id, order_by=FASTEST_LAP_ORDER)
+            .label("rank"),
+        )
+        .where(Lap.run_id.in_(run_ids), Lap.fastest_lap_eligible)
+        .subquery()
     )
-    return RunLapSummary(recorded, completed, eligible, fastest)
+    fastest = {
+        lap.run_id: lap
+        for lap in session.scalars(
+            select(Lap).join(ranked, ranked.c.lap_id == Lap.id).where(ranked.c.rank == 1)
+        )
+    }
+    return {
+        run_id: RunLapSummary(recorded, completed, eligible, fastest.get(run_id))
+        for run_id, recorded, completed, eligible in counts
+    }
+
+
+def summarize_run_laps(session: Session, run_id: int) -> RunLapSummary:
+    return lap_summaries(session, [run_id]).get(run_id, EMPTY_LAP_SUMMARY)
 
 
 def get_fastest_lap(session: Session, run_id: int) -> RunLapSummary:

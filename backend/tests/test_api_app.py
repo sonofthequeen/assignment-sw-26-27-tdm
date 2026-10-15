@@ -43,6 +43,18 @@ def test_openapi_lists_only_versioned_implemented_paths(client):
         f"{API}/seasons/{{season_id}}/mileage",
         f"{API}/vehicles/{{vehicle_id}}/mileage",
         f"{API}/drivers/{{driver_id}}/mileage",
+        f"{API}/runs",
+        f"{API}/analytics/fastest-laps",
+        f"{API}/tests/{{test_id}}/plan-vs-actual",
+        f"{API}/tire-compounds",
+        f"{API}/tire-compounds/{{compound_id}}",
+        f"{API}/tire-sets",
+        f"{API}/tire-sets/{{tire_set_id}}",
+        f"{API}/tires",
+        f"{API}/tires/{{tire_id}}",
+        f"{API}/runs/{{run_id}}/tire-assignments",
+        f"{API}/runs/{{run_id}}/tire-measurements",
+        f"{API}/runs/{{run_id}}/alignment-measurements",
     }
 
 

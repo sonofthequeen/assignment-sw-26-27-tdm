@@ -1,6 +1,6 @@
 # Data Model
 
-Status: **MVP-Core schema implemented** (Alembic revisions `0001` and `0002`).
+Status: **MVP-Core schema plus tyres implemented** (Alembic revisions `0001` to `0003`).
 Source of truth: `backend/app/models/` and `backend/alembic/versions/`;
 `backend/tests/test_migrations.py` verifies that migrations and models produce the same schema.
 
@@ -142,6 +142,68 @@ erDiagram
     }
 ```
 
+### 1.1 Tyres and measurements (revision 0003)
+
+Code, tables and API paths use **tire**; one `TIRE` row is one physical tyre.
+
+```mermaid
+erDiagram
+    TIRE_COMPOUND ||--o{ TIRE_SET : "compound of"
+    TIRE_COMPOUND ||--o{ TIRE : "compound of"
+    TIRE_SET |o--o{ TIRE : "contains (same compound)"
+    TIRE ||--o{ RUN_TIRE_ASSIGNMENT : "fitted in"
+    RUN ||--o{ RUN_TIRE_ASSIGNMENT : "fitment"
+    RUN_TIRE_ASSIGNMENT ||--o{ TIRE_MEASUREMENT : "measured"
+    RUN ||--o{ ALIGNMENT_MEASUREMENT : "alignment"
+
+    TIRE_COMPOUND {
+        int id PK
+        string manufacturer "UK with name"
+        string name
+        text notes
+    }
+    TIRE_SET {
+        int id PK "UK with compound_id"
+        string set_code UK
+        int compound_id FK
+        date introduced_on
+        text notes
+    }
+    TIRE {
+        int id PK
+        string serial_number UK "global"
+        int compound_id FK
+        int tire_set_id FK "nullable; FK with compound_id"
+        text notes
+    }
+    RUN_TIRE_ASSIGNMENT {
+        int run_id PK, FK
+        enum corner PK "FL FR RL RR"
+        int tire_id FK "UK with run_id"
+        text notes
+    }
+    TIRE_MEASUREMENT {
+        int id PK
+        int run_id FK "FK with corner"
+        enum corner FK
+        enum phase "PRE_RUN POST_RUN"
+        decimal pressure_kpa
+        decimal temperature_inner_c
+        decimal temperature_center_c
+        decimal temperature_outer_c
+        text notes
+    }
+    ALIGNMENT_MEASUREMENT {
+        int id PK
+        int run_id FK
+        enum corner
+        enum phase "PRE_RUN POST_RUN"
+        decimal camber_deg
+        decimal toe_deg
+        text notes
+    }
+```
+
 ## 2. Engineering units and numeric precision
 
 Units are carried in column names. Every physical quantity is metric/SI-derived.
@@ -159,6 +221,9 @@ Units are carried in column names. Every physical quantity is metric/SI-derived.
 | `_n_per_mm` | newtons per millimetre | NUMERIC(7,2) | 0.01 N/mm |
 | `*_at` | UTC timestamp | DATETIME (naive UTC) | microseconds |
 | `test_date`, `*_on` | local calendar date | DATE | day |
+| `pressure_kpa` | kilopascal, gauge | NUMERIC(4,1) | 0.1 kPa |
+| `temperature_inner_c` / `_center_c` / `_outer_c` | tyre surface temperature, °C | NUMERIC(4,1) | 0.1 °C |
+| `camber_deg` / `toe_deg` (alignment) | degrees | NUMERIC(5,2) / NUMERIC(5,3) | 0.01° / 0.001° |
 
 **SQLite limitation:** SQLite has no exact DECIMAL type. NUMERIC values are stored with
 REAL/INTEGER affinity, and SQLAlchemy converts them back to `Decimal` at the declared scale.
@@ -236,6 +301,62 @@ calendar concept, not an instant.
   - Every other FK uses the default (NO ACTION), so historical parents with children
     cannot be deleted. This is tested for `test`.
 
+
+## 3a. Tyre modelling decisions
+
+**Compound ownership:**
+- `tire.compound_id` is always set, so runs can be filtered by compound with one join.
+- `tire.tire_set_id` is optional, because single spare tyres exist.
+- A tyre in a set always has the set's compound. This is a **database invariant**: `tire`
+  has a composite FK `(tire_set_id, compound_id)` to `tire_set(id, compound_id)`, which is
+  backed by `UNIQUE(id, compound_id)` on `tire_set`. No trigger is used, and there is only
+  one source of truth.
+- For a standalone tyre `tire_set_id` is NULL. The composite FK is then not checked (MATCH
+  SIMPLE), and `compound_id` is checked by its own FK.
+- The service fills in the set's compound automatically, and rejects a contradicting
+  `compound_id` with 422 `tire_compound_mismatch`.
+
+**Physical identity:**
+- `tire.serial_number` is globally unique (409 `tire_identifier_taken`).
+- Referenced tyres cannot be deleted; this is tested.
+
+**Fitment** (`run_tire_assignment`) is recorded on actual runs only, never on planned runs:
+- The primary key `(run_id, corner)` allows one tyre per corner.
+- `UNIQUE(run_id, tire_id)` stops one tyre from occupying two corners of a run.
+- The same tyre may be fitted on many runs: repeated attempts, retries and unexpected runs.
+- Fitment is **create-once**, with no update or delete. Corners may be recorded together or
+  in several requests. Corrections are deferred to explicit correction records.
+
+**Mixed compounds** within one run can be represented. The run search's `tire_compound_id`
+matches a run if **any** fitted tyre uses that compound (see `docs/architecture.md`). Asking
+"all four corners on compound X" would need a future, stricter filter.
+
+**Tyre measurements** (`tire_measurement`) record gauge pressure and inner, centre and outer
+surface temperature for one corner and phase (PRE_RUN or POST_RUN).
+- The composite FK `(run_id, corner)` to `run_tire_assignment` means **a corner without a
+  fitted tyre cannot be measured**. The measured tyre is therefore always known, and it is
+  returned as `tire_id`.
+- `UNIQUE(run_id, corner, phase)`.
+- Individual values may be NULL (not measured), but CHECK `has_a_value` requires at least
+  one, and CHECK requires pressure to be greater than 0.
+
+**Alignment measurements** (`alignment_measurement`) record observed camber and toe per run,
+corner and phase, with `UNIQUE(run_id, corner, phase)` and at least one value.
+- They are deliberately separate from `setup_corner_params`: a **setup snapshot is the
+  intended static configuration**, while an alignment measurement is **what was measured
+  around a run**.
+- A measurement never writes to a snapshot (tested), so comparing the two shows drift.
+
+**Plausibility ranges** are application policy in `app/policies.py`, not CHECK constraints.
+Each is inclusive:
+
+| Value | Range |
+|---|---|
+| Pressure | 0 < p ≤ 400.0 kPa |
+| Tyre temperature | −30.0 to 150.0 °C |
+| Camber | ±10° |
+| Toe | ±5° |
+
 ## 4. Lap semantics encoded in the schema
 
 | Rule | Where |
@@ -295,6 +416,16 @@ These patterns are already covered by unique constraints, so no extra index was 
 - `planned_run.test_id`: prefix of `uq_planned_run_test_id_sequence_number`.
 - `track_layout.track_location_id`: prefix of `uq_track_layout_track_location_id_name`.
 - `setup_corner_params.setup_snapshot_id`: PK prefix.
+- Tyre tables (revision 0003) add **no explicit index**:
+  - Fitment of a run uses the `pk_run_tire_assignment (run_id, corner)` prefix.
+  - The compound search filter is a correlated EXISTS. EXPLAIN QUERY PLAN shows a covering
+    search on `uq_run_tire_assignment_run_id_tire_id (run_id, …)` followed by the `tire`
+    primary key.
+  - Measurement lookup by run uses the `UNIQUE(run_id, corner, phase)` prefix, and set and
+    tyre uniqueness use their UNIQUE indexes.
+  - Not added: `tire(compound_id)` and `tire_set(compound_id)`, because the tyre inventory is
+    small and those list filters are scans of tens of rows. `run_tire_assignment(tire_id)`
+    would support "every run a tyre was used on", but that query is not implemented.
 
 Evaluated and **not** added:
 
@@ -314,7 +445,6 @@ in an additive Alembic revision (new tables with FKs to existing ones), with no 
 | Entity | Class | Planned revision / phase | Attaches to |
 |---|---|---|---|
 | SeasonObjective, TestObjective, RunObjective | MVP-Complete | after MVP-Core (Phase 6+) | season, test, run |
-| TireCompound, TireSet, Tire, RunTireAssignment, TireMeasurement, AlignmentMeasurement | MVP-Complete | Phase 6 | run (assignment: `UNIQUE(run, corner)`, `UNIQUE(run, tire)`) |
 | Wider setup parameters (dampers, ARB, corner mass, shims, ride height, aero) | MVP-Complete | after MVP-Core (Phase 6+) | new nullable columns on existing setup tables (additive ADD COLUMN) |
 | TelemetryFile (metadata index) | MVP-Complete | Phase 6 | test, optional run |
 | ImportBatch (CSV import provenance) | MVP-Complete | Phase 7 | none |

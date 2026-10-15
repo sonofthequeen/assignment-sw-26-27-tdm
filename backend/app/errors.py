@@ -65,6 +65,27 @@ KNOWN_CONSTRAINTS: dict[str, TranslatedError] = {
     "uq_lap_run_id_lap_number": _unique(
         "lap_number_taken", "lap_number", "This run already has a lap with this lap number."
     ),
+    "uq_tire_compound_manufacturer_name": _unique(
+        "tire_compound_conflict", "name", "This manufacturer already has a compound with this name."
+    ),
+    "uq_tire_set_set_code": _unique(
+        "tire_set_code_taken", "set_code", "A tyre set with this code exists."
+    ),
+    "uq_tire_serial_number": _unique(
+        "tire_identifier_taken", "serial_number", "A tyre with this serial number exists."
+    ),
+    "pk_run_tire_assignment": _unique(
+        "tire_assignment_conflict", "corner", "This corner already has a tyre for the run."
+    ),
+    "uq_run_tire_assignment_run_id_tire_id": _unique(
+        "tire_assignment_conflict", "tire_id", "This tyre is already fitted for the run."
+    ),
+    "uq_tire_measurement_run_id_corner_phase": _unique(
+        "tire_measurement_conflict", "phase", "This corner and phase are already measured."
+    ),
+    "uq_alignment_measurement_run_id_corner_phase": _unique(
+        "alignment_measurement_conflict", "phase", "This corner and phase are already measured."
+    ),
     "pk_run_condition": _unique(
         "run_condition_already_exists", "run_id", "This run already has recorded conditions."
     ),

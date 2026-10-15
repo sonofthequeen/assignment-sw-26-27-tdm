@@ -168,3 +168,60 @@ def test_revision_0002_upgrade_preserves_existing_rows_and_downgrade_works(tmp_p
             assert conn.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
     finally:
         engine.dispose()
+
+
+def test_revision_0003_adds_tyre_tables_without_touching_existing_data(tmp_path):
+    url = sqlite_url(tmp_path / "phase6.sqlite3")
+    config = alembic_config(url)
+    command.upgrade(config, "0002")
+    engine = create_db_engine(url)
+    seed = (
+        "INSERT INTO season (id, name) VALUES (1, 'S')",
+        "INSERT INTO vehicle (id, code, name) VALUES (1, 'V', 'V')",
+        "INSERT INTO track_location (id, name) VALUES (1, 'L')",
+        "INSERT INTO track_layout (id, track_location_id, name, activity_type, verified_length_m,"
+        " length_verified_on) VALUES (1, 1, 'A', 'AUTOCROSS', 1000, '2026-01-01')",
+        "INSERT INTO driver (id, code, full_name) VALUES (1, 'D', 'D')",
+        "INSERT INTO test (id, season_id, vehicle_id, track_location_id, test_date, status)"
+        " VALUES (1, 1, 1, 1, '2026-03-01', 'PLANNED')",
+        "INSERT INTO run (id, test_id, run_number, driver_id, track_layout_id)"
+        " VALUES (1, 1, 1, 1, 1)",
+        "INSERT INTO run_condition (run_id, asphalt_temperature_c, conditions_source)"
+        " VALUES (1, 34.5, 'MEASURED')",
+        "INSERT INTO lap (run_id, lap_number, lap_classification, raw_time_ms, timing_valid,"
+        " physically_completed) VALUES (1, 1, 'FLYING', 65000, 1, 1)",
+    )
+    snapshot_query = "SELECT count(*) FROM lap"
+    try:
+        with engine.begin() as conn:
+            for statement in seed:
+                conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+        with engine.begin() as conn:
+            assert conn.execute(text(snapshot_query)).scalar_one() == 1
+            assert (
+                conn.execute(text("SELECT asphalt_temperature_c FROM run_condition")).scalar_one()
+                == 34.5
+            )
+            conn.execute(
+                text("INSERT INTO tire_compound (id, manufacturer, name) VALUES (1, 'M', 'C')")
+            )
+            conn.execute(
+                text("INSERT INTO tire (id, serial_number, compound_id) VALUES (1, 'T', 1)")
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO run_tire_assignment (run_id, corner, tire_id) VALUES (1, 'FL', 1)"
+                )
+            )
+
+        command.downgrade(config, "0002")
+        with engine.connect() as conn:
+            tables = set(inspect(conn).get_table_names())
+            assert not tables & {"tire", "tire_set", "tire_compound", "run_tire_assignment"}
+            assert conn.execute(text(snapshot_query)).scalar_one() == 1
+            assert conn.execute(text("PRAGMA foreign_key_check")).all() == []
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()

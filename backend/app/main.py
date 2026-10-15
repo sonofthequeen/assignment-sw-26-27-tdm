@@ -41,6 +41,10 @@ OPENAPI_TAGS = [
     {"name": "run conditions", "description": "Ambient/asphalt conditions per run (write-once)."},
     {"name": "laps", "description": "Lap records, effective time and fastest eligible lap."},
     {"name": "mileage", "description": "Derived distance per run, test, season, vehicle, driver."},
+    {"name": "analytics", "description": "Read-only rankings over historical laps."},
+    {"name": "tyres", "description": "Compounds, tyre sets and physical tyres (one row per tyre)."},
+    {"name": "tyre fitment", "description": "Which physical tyre was on which corner of a run."},
+    {"name": "measurements", "description": "Pre/post-run tyre and alignment measurements."},
 ]
 
 

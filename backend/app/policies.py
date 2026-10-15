@@ -52,3 +52,24 @@ class LapIngestion:
 CONDITION_LIMITS = ConditionLimits()
 LAP_PLAUSIBILITY = LapPlausibility()
 LAP_INGESTION = LapIngestion()
+
+
+@dataclass(frozen=True)
+class TyreMeasurementLimits:
+    """Plausibility for tyre and alignment measurements (inclusive).
+
+    Pressure is gauge pressure. Formula Student slicks typically run 60-120 kPa;
+    the 400 kPa cap (about 58 psi) is far above any real value and catches unit
+    mix-ups such as millibar entered as kPa, without rejecting real data.
+    Tyre surface temperatures cover a cold morning to an overheated tyre.
+    Camber/toe bounds match the setup snapshot validation.
+    """
+
+    pressure_max_kpa: Decimal = Decimal("400.0")
+    temperature_min_c: Decimal = Decimal("-30.0")
+    temperature_max_c: Decimal = Decimal("150.0")
+    camber_abs_max_deg: Decimal = Decimal("10")
+    toe_abs_max_deg: Decimal = Decimal("5")
+
+
+TYRE_MEASUREMENT_LIMITS = TyreMeasurementLimits()
