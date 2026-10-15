@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-600: #1d4ed8;
+  --color-accent-700: #1e40af;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+}
+
+/* Visible focus for keyboard users on every interactive element. */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--color-accent-600);
+  outline-offset: 2px;
+}
