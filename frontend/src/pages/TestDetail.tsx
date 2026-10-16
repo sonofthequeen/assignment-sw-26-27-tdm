@@ -14,6 +14,7 @@ import {
   statusTone,
   tableClass,
   tdClass,
+  tdTextClass,
   thClass,
 } from "../components/ui";
 import type { AttemptSummary, PlannedRun, TestPlanVsActual } from "../types/api";
@@ -126,15 +127,15 @@ function PlanVsActual({ pva, plans }: { pva: TestPlanVsActual; plans: Map<number
                         {outcome.repeated && <Badge tone="warn">Repeated attempts</Badge>}
                       </div>
                     </td>
-                    <td className={tdClass}>
+                    <td className={tdTextClass}>
                       {plan?.expected_lap_count != null && <div>{plan.expected_lap_count} laps expected</div>}
                       {plan?.target_lap_time_ms != null && <div>target {formatLapTime(plan.target_lap_time_ms)}</div>}
                       {plan?.notes && <div className="text-slate-500">{plan.notes}</div>}
                     </td>
-                    <td className={tdClass}>
+                    <td className={tdTextClass}>
                       {outcome.attempts.length === 0 ? <span className="text-slate-500">none</span> : <Attempts attempts={outcome.attempts} />}
                     </td>
-                    <td className={tdClass}>
+                    <td className={tdTextClass}>
                       {outcome.cancellation_reason && <div>Cancelled: {outcome.cancellation_reason}</div>}
                       {outcome.replacement_reason && (
                         <div>

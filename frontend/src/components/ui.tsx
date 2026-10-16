@@ -159,7 +159,11 @@ export const inputClass =
   "mt-1 block w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm aria-[invalid=true]:border-red-500";
 export const tableClass = "min-w-full divide-y divide-slate-200 text-sm";
 export const thClass = "px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
-export const tdClass = "px-2 py-1.5 align-top";
+// Cells stay on one line so values (dates, times, codes, units) never break mid-token;
+// narrow screens scroll the table container horizontally instead.
+export const tdClass = "whitespace-nowrap px-2 py-1.5 align-top";
+/** For free-text columns that should wrap within a readable width. */
+export const tdTextClass = "min-w-56 whitespace-normal px-2 py-1.5 align-top";
 
 /** Two-column definition list for detail pages. */
 export function Facts({ items }: { items: [string, ReactNode][] }) {

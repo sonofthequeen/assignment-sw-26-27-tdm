@@ -1,10 +1,8 @@
 # Architecture
 
-Status: **Phase 7**. The backend is complete for the assignment: API foundation, the
-planned-versus-actual workflow, append-only setup snapshots, run conditions, laps, fastest
-lap, mileage, **historical run search**, fastest-lap rankings and the test plan-vs-actual
-summary, tyre inventory, fitment and measurements, objectives, the telemetry file index,
-deterministic seed data and the CSV importer. Later phases extend this document.
+Status: **final**. The backend is complete for the assignment. Packaging (Docker, Compose,
+CI) and run commands are in the [README](../README.md); the reasoning is in
+[ToughtProcess.md](ToughtProcess.md).
 The schema is documented in [data-model.md](data-model.md).
 
 ## Backend layout
@@ -618,7 +616,7 @@ changes are the named planned-run commands above. A planned run is always create
 | Run conditions | `POST /runs/{id}/conditions` (write-once), `GET /runs/{id}/conditions` |
 | Laps | `POST /runs/{id}/laps`, `POST /runs/{id}/laps/bulk`, `GET /runs/{id}/laps`, `GET /laps/{id}`, `GET /runs/{id}/fastest-lap` |
 | Mileage | `GET /runs/{id}/mileage`, `GET /tests/{id}/mileage`, `GET /seasons/{id}/mileage`, `GET /vehicles/{id}/mileage`, `GET /drivers/{id}/mileage` |
-| Historical search | `GET /runs?season_id=&vehicle_id=&driver_id=&track_location_id=&track_layout_id=&activity_type=&date_from=&date_to=&ambient_temperature_min_c=&ambient_temperature_max_c=&asphalt_temperature_min_c=&asphalt_temperature_max_c=&planned_run_id=&has_plan=&test_status=` |
+| Historical search | `GET /runs?season_id=&vehicle_id=&driver_id=&track_location_id=&track_layout_id=&activity_type=&date_from=&date_to=&ambient_temperature_min_c=&ambient_temperature_max_c=&asphalt_temperature_min_c=&asphalt_temperature_max_c=&tire_compound_id=&planned_run_id=&has_plan=&test_status=` |
 | Analytics | `GET /analytics/fastest-laps?track_layout_id=|activity_type=&…`, `GET /tests/{id}/plan-vs-actual` |
 | Tyre inventory | `POST`/`GET /tire-compounds`, `GET /tire-compounds/{id}`, `POST`/`GET /tire-sets`, `GET /tire-sets/{id}`, `POST`/`GET /tires`, `GET /tires/{id}` |
 | Fitment and measurements | `POST`/`GET /runs/{id}/tire-assignments`, `POST`/`GET /runs/{id}/tire-measurements`, `POST`/`GET /runs/{id}/alignment-measurements` |

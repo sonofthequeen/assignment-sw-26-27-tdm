@@ -1,0 +1,26 @@
+name: race-up-tdm
+
+# Full stack: frontend (Nginx) on http://localhost:8080, backend API on http://localhost:8000.
+# Migrations run when the backend starts. Synthetic demo data is opt-in:
+#   SEED_DEMO_DATA=true docker compose up --build
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: sqlite:////data/tdm.sqlite3
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+    volumes:
+      - tdm-data:/data
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  tdm-data:
